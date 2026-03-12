@@ -16,9 +16,10 @@
 - [x] Confirm MCP command format: `"command": ["python", "path", "--arg", "val"]` (array, not string+args)
 - [x] Session data: use `opencode session list` + `opencode export <id>` (not raw file parsing)
 - [x] Fixed setup_dev_agent.py, teardown_dev_agent.py, read_logs.py, SKILL.md accordingly
+- [x] Confirmed: `opencode run` requires a real TTY — cannot be driven as a subprocess from Claude Code bash (winpty doesn't bridge the gap either). SKILL.md updated: skill instructs the user to run tests in a separate terminal, then comes back for log evaluation.
+- [x] Confirmed session export format via `opencode export <id>` — messages have `info.role`, `info.tokens`, `parts[]` with `type/text` fields. read_logs.py updated accordingly.
 - [ ] Test mock_mcp_server.py against a real OpenCode agent session (MCP tool schema validation)
-- [ ] Test setup_dev_agent.py end-to-end with a simple 2-agent workflow
-- [ ] Validate read_logs.py output against a real `opencode export` JSON structure
+- [ ] Test setup_dev_agent.py end-to-end with a 2-agent workflow where subagents use mock tools
 
 ## Phase 3 — Workflow analysis agent
 - [ ] Add `workflow-analyzer.md` subagent

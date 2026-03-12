@@ -48,7 +48,14 @@ def get_agent_spec(workflow: dict, agent_name: str) -> dict:
 
 
 def rewrite_agent_prompt(content: str, calls: list) -> str:
-    """Replace @subagent mentions with mock tool instructions."""
+    """Replace @subagent mentions with mock tool instructions and force mode: all."""
+    # Force mode to "all" so the DEV agent can be invoked directly with opencode run
+    content = re.sub(r'^(mode:\s*)subagent\s*$', r'\1all', content, flags=re.MULTILINE)
+    content = re.sub(r'^(mode:\s*)primary\s*$', r'\1all', content, flags=re.MULTILINE)
+    # If no mode field exists in frontmatter, inject one
+    if not re.search(r'^mode:', content, re.MULTILINE):
+        content = re.sub(r'^(---\n)', r'\1mode: all\n', content, count=1)
+
     for called_agent in calls:
         # Replace @agentname with instruction to use mock tool
         content = re.sub(
