@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """
-Parses OpenCode session logs for a given agent and outputs a structured summary.
+Reads OpenCode session logs for a given agent from the SQLite database.
 
-Uses `opencode session list` and `opencode export <id>` to retrieve session data.
+Storage: ~/.local/share/opencode/opencode.db
+  - session table: id, title, directory, time_updated, data (JSON)
+  - message table: session_id, time_created, data (JSON with role, tokens, agent)
+  - part table: message_id, session_id, data (JSON with type, text)
 
 Usage:
     python read_logs.py --agent DEV_<name> [--last N] [--session-id <id>]
@@ -10,123 +13,96 @@ Usage:
 
 import argparse
 import json
-import re
-import subprocess
+import sqlite3
 import sys
+from pathlib import Path
+
+DB_PATH = Path.home() / ".local" / "share" / "opencode" / "opencode.db"
 
 
-def run_cmd(args: list) -> str:
-    result = subprocess.run(args, capture_output=True, text=True)
-    return result.stdout.strip()
+def open_db() -> sqlite3.Connection:
+    # Try both Unix and Windows path styles
+    for path in [DB_PATH, Path(str(DB_PATH).replace("/c/Users", "C:/Users"))]:
+        if path.exists():
+            return sqlite3.connect(str(path))
+    # Fallback: try Windows AppData
+    alt = Path.home() / "AppData" / "Local" / "opencode" / "opencode.db"
+    if alt.exists():
+        return sqlite3.connect(str(alt))
+    print(f"opencode.db not found. Tried: {DB_PATH}", file=sys.stderr)
+    sys.exit(1)
 
 
-def list_sessions() -> list[dict]:
-    """Get sessions via `opencode session list` — output is plain text, parse it."""
-    raw = run_cmd(["opencode", "session", "list"])
-    if not raw or "No sessions" in raw:
-        return []
+def get_sessions(conn: sqlite3.Connection, agent_name: str, last_n: int) -> list[dict]:
+    rows = conn.execute(
+        "SELECT id, title, directory, time_updated FROM session ORDER BY time_updated DESC LIMIT 200"
+    ).fetchall()
 
-    sessions = []
-    # Try JSON first
-    try:
-        data = json.loads(raw)
-        if isinstance(data, list):
-            return data
-    except json.JSONDecodeError:
-        pass
+    matched = []
+    for sid, title, directory, ts in rows:
+        # Check if any message in this session mentions our agent
+        msgs = conn.execute(
+            "SELECT data FROM message WHERE session_id=?", (sid,)
+        ).fetchall()
+        for (mdata,) in msgs:
+            d = json.loads(mdata)
+            if d.get("agent", "").lower() == agent_name.lower() or \
+               d.get("mode", "").lower() == agent_name.lower():
+                matched.append({"id": sid, "title": title, "directory": directory, "ts": ts})
+                break
+        if len(matched) >= last_n:
+            break
 
-    # Parse plain text lines: look for session IDs (typically UUIDs or short hashes)
-    for line in raw.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        # Match lines that contain a session ID pattern
-        match = re.search(r'([a-f0-9\-]{8,})', line, re.IGNORECASE)
-        if match:
-            sessions.append({"id": match.group(1), "raw": line})
-
-    return sessions
+    return matched
 
 
-def export_session(session_id: str) -> dict | None:
-    """Export a session as JSON via `opencode export <id>`."""
-    raw = run_cmd(["opencode", "export", session_id])
-    if not raw:
-        return None
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        # Sometimes export writes to a file — check if it printed a path
-        path_match = re.search(r'[\w/\\:.-]+\.json', raw)
-        if path_match:
-            try:
-                with open(path_match.group(0)) as f:
-                    return json.load(f)
-            except Exception:
-                pass
-        print(f"Warning: could not parse export output for session {session_id}", file=sys.stderr)
-        return None
+def summarize_session(conn: sqlite3.Connection, sid: str, agent_name: str) -> dict:
+    msgs = conn.execute(
+        "SELECT id, data FROM message WHERE session_id=? ORDER BY time_created", (sid,)
+    ).fetchall()
 
-
-def session_mentions_agent(session: dict, agent_name: str) -> bool:
-    """Check if a session involves the given agent."""
-    text = json.dumps(session).lower()
-    return agent_name.lower() in text
-
-
-def summarize_session(session: dict, agent_name: str) -> dict:
-    """Extract meaningful signal from an exported session."""
     tool_calls = []
     mock_calls = []
     errors = []
     final_response = None
     step_count = 0
+    total_tokens = {"input": 0, "output": 0}
 
-    # Session export structure varies — handle common shapes
-    messages = session.get("messages", session.get("turns", session.get("events", [])))
-    if isinstance(session, list):
-        messages = session
+    for msg_id, mdata in msgs:
+        msg = json.loads(mdata)
+        role = msg.get("role", "")
+        tokens = msg.get("tokens") or {}
+        total_tokens["input"] += tokens.get("input", 0)
+        total_tokens["output"] += tokens.get("output", 0)
 
-    for msg in messages:
-        role = msg.get("role", msg.get("type", ""))
-        content = msg.get("content", "")
+        parts = conn.execute(
+            "SELECT data FROM part WHERE message_id=? ORDER BY rowid", (msg_id,)
+        ).fetchall()
 
-        # Tool use blocks
-        if isinstance(content, list):
-            for block in content:
-                if not isinstance(block, dict):
-                    continue
-                btype = block.get("type", "")
-                if btype == "tool_use":
-                    name = block.get("name", "")
-                    inp = block.get("input", {})
-                    step_count += 1
-                    if name.startswith("mock_"):
-                        mock_calls.append({
-                            "tool": name,
-                            "prompt": inp.get("prompt", str(inp))[:300]
-                        })
-                    else:
-                        tool_calls.append({
-                            "tool": name,
-                            "input_summary": str(inp)[:200]
-                        })
-                elif btype == "text" and role == "assistant":
-                    text = block.get("text", "")
-                    if len(text) > 20:
-                        final_response = text[:1000]
+        for (pdata,) in parts:
+            p = json.loads(pdata)
+            ptype = p.get("type", "")
+            text = p.get("text", "")
 
-        # Plain text assistant message
-        elif role == "assistant" and isinstance(content, str) and len(content) > 20:
-            final_response = content[:1000]
+            if ptype == "tool-input":
+                name = p.get("toolName", p.get("name", ""))
+                inp = p.get("input", {})
+                step_count += 1
+                if name.startswith("mock_"):
+                    mock_calls.append({"tool": name, "prompt": inp.get("prompt", str(inp))[:300]})
+                else:
+                    tool_calls.append({"tool": name, "input_summary": str(inp)[:200]})
 
-        # Error events
-        if role == "error" or "error" in str(msg).lower()[:80]:
-            errors.append(str(msg)[:300])
+            elif ptype == "text" and role == "assistant" and text.strip():
+                final_response = text.strip()[:1000]
+
+            elif ptype == "error":
+                errors.append(text[:300])
 
     return {
         "agent": agent_name,
         "steps": step_count,
+        "total_tokens": total_tokens,
         "tool_calls": tool_calls,
         "mock_calls": mock_calls,
         "errors": errors,
@@ -134,11 +110,13 @@ def summarize_session(session: dict, agent_name: str) -> dict:
     }
 
 
-def print_summary(summary: dict, session_id: str):
+def print_summary(summary: dict, session: dict):
     print(f"\n{'='*60}")
-    print(f"Session: {session_id}")
+    print(f"Session: {session['id']}")
+    print(f"Title:   {session['title']}")
     print(f"Agent:   {summary['agent']}")
     print(f"Steps:   {summary['steps']}")
+    print(f"Tokens:  input={summary['total_tokens']['input']}  output={summary['total_tokens']['output']}")
     print()
 
     if summary["mock_calls"]:
@@ -159,53 +137,46 @@ def print_summary(summary: dict, session_id: str):
             print(f"  ! {e}")
 
     if summary["final_response"]:
-        print(f"\nFinal response (truncated at 1000 chars):")
+        print(f"\nFinal response:")
         print(f"  {summary['final_response']}")
     else:
-        print("\nFinal response: (not found in export)")
+        print("\nFinal response: (none found)")
 
     print(f"{'='*60}")
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--agent", required=True, help="Agent name to filter for (e.g. DEV_analyzer)")
-    parser.add_argument("--last", type=int, default=1, help="Number of most recent matching sessions to show")
-    parser.add_argument("--session-id", help="Export a specific session by ID")
+    parser.add_argument("--agent", required=True, help="Agent name (e.g. DEV_sum-specialist)")
+    parser.add_argument("--last", type=int, default=1, help="Number of recent matching sessions")
+    parser.add_argument("--session-id", help="Inspect a specific session by ID")
     args = parser.parse_args()
 
+    conn = open_db()
+
     if args.session_id:
-        session = export_session(args.session_id)
-        if not session:
-            print(f"Could not export session {args.session_id}", file=sys.stderr)
+        row = conn.execute(
+            "SELECT id, title, directory, time_updated FROM session WHERE id=?", (args.session_id,)
+        ).fetchone()
+        if not row:
+            print(f"Session not found: {args.session_id}", file=sys.stderr)
             sys.exit(1)
-        summary = summarize_session(session, args.agent)
-        print_summary(summary, args.session_id)
+        s = {"id": row[0], "title": row[1], "directory": row[2], "ts": row[3]}
+        summary = summarize_session(conn, s["id"], args.agent)
+        print_summary(summary, s)
         return
 
-    sessions = list_sessions()
+    sessions = get_sessions(conn, args.agent, args.last)
     if not sessions:
-        print("No sessions found. Run a test first with:", file=sys.stderr)
-        print(f"  opencode run --agent DEV_{args.agent} \"<test prompt>\"", file=sys.stderr)
+        print(f"No sessions found for agent '{args.agent}'.", file=sys.stderr)
+        print("Run: opencode run --agent DEV_<name> \"<prompt>\" in a terminal first.", file=sys.stderr)
         sys.exit(1)
 
-    matched = 0
     for s in sessions:
-        sid = s.get("id", s.get("sessionId", "unknown"))
-        session_data = export_session(sid)
-        if session_data is None:
-            continue
-        if not session_mentions_agent(session_data, args.agent):
-            continue
-        summary = summarize_session(session_data, args.agent)
-        print_summary(summary, sid)
-        matched += 1
-        if matched >= args.last:
-            break
+        summary = summarize_session(conn, s["id"], args.agent)
+        print_summary(summary, s)
 
-    if matched == 0:
-        print(f"No sessions found mentioning agent '{args.agent}'.", file=sys.stderr)
-        print("Try --session-id <id> to inspect a specific session.", file=sys.stderr)
+    conn.close()
 
 
 if __name__ == "__main__":

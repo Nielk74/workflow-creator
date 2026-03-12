@@ -18,6 +18,8 @@
 - [x] Fixed setup_dev_agent.py, teardown_dev_agent.py, read_logs.py, SKILL.md accordingly
 - [x] Confirmed: `opencode run` requires a real TTY — cannot be driven as a subprocess from Claude Code bash (winpty doesn't bridge the gap either). SKILL.md updated: skill instructs the user to run tests in a separate terminal, then comes back for log evaluation.
 - [x] Confirmed session export format via `opencode export <id>` — messages have `info.role`, `info.tokens`, `parts[]` with `type/text` fields. read_logs.py updated accordingly.
+- [x] Validated DEV_sum-specialist with ollama/qwen3.5:9b — model responded correctly
+- [x] Confirmed storage: ~/.local/share/opencode/opencode.db (SQLite). Tables: session, message, part — all data in JSON `data` column. `opencode export` only works with a running server; DB direct access works always. read_logs.py rewritten to query SQLite directly.
 - [ ] Test mock_mcp_server.py against a real OpenCode agent session (MCP tool schema validation)
 - [ ] Test setup_dev_agent.py end-to-end with a 2-agent workflow where subagents use mock tools
 
