@@ -176,17 +176,15 @@ Triggers are regex patterns matched against the prompt. First match wins. Always
 
 ### 4.3 Run the DEV agent
 
-`opencode run` requires a real terminal (TTY) — it cannot be driven as a background subprocess. Ask the user to open a new terminal window and run:
+`opencode run` requires a real terminal (TTY) — it cannot be driven as a background subprocess. Ask the user to open a new terminal window and run the test prompt inline:
 
 ```bash
-opencode run --agent DEV_<name>
+opencode run --agent DEV_<name> "your test prompt here"
 ```
 
-Then type (or paste) the test prompt directly in the opencode TUI. OpenCode always reads the latest config on startup, so no restart is needed after `setup_dev_agent.py` runs.
+OpenCode always reads the latest config on startup, so no restart is needed after `setup_dev_agent.py` runs.
 
-Prepare 2–3 realistic test prompts. Run them one at a time. After each run, ask the user to come back here — then read the session logs.
-
-> **Tip**: ask the user to note the session ID shown in the opencode UI, or retrieve it with `opencode session list` after they're done.
+Prepare 2–3 realistic test prompts. Run them one at a time. After each run, ask the user to come back here — then read the session logs with `opencode session list` + `opencode export <id>`.
 
 ### 4.4 Read session logs
 
