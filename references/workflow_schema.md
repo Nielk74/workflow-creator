@@ -85,6 +85,30 @@ mock_responses:
       response: "Fix applied. Please re-run analyzer to confirm."
 ```
 
+## Trigger evals (optional)
+
+For each agent, you can define trigger evals to optimize its `description` field. Save as `<agent-name>-trigger-evals.json` alongside `workflow.yml`:
+
+```json
+[
+  {"prompt": "realistic user prompt that should invoke this agent", "should_trigger": true},
+  {"prompt": "similar-looking prompt that should NOT invoke this agent", "should_trigger": false}
+]
+```
+
+Good trigger evals:
+- **Should-trigger**: varied phrasings, some casual, some with typos, edge cases where the agent competes with another
+- **Should-not-trigger**: near-misses that share keywords but need a different agent — avoid obviously unrelated prompts
+
+Run optimization:
+```bash
+python ~/.config/opencode/workflow-creator/scripts/optimize_descriptions.py \
+  --agent <name> \
+  --evals .opencode/<name>-trigger-evals.json \
+  --model ollama/qwen3.5:9b \
+  --iterations 3
+```
+
 ## Notes
 
 - `calls` controls what the Mock MCP exposes when testing this agent — only agents listed in `calls` will have mock tools generated.

@@ -291,6 +291,37 @@ If the workflow isn't clearly better than baseline for this prompt, go back to S
 
 ---
 
+## Stage 9 — Description Optimization (optional)
+
+Subagents auto-trigger based on their `description` field. If an agent is being missed or over-invoked, optimize its description.
+
+### 9.1 Create trigger evals
+
+Write 8–10 prompts per agent: half that should trigger it, half that shouldn't. Near-misses are more valuable than obvious cases. Save to `.opencode/<agent-name>-trigger-evals.json`:
+
+```json
+[
+  {"prompt": "...", "should_trigger": true},
+  {"prompt": "...", "should_trigger": false}
+]
+```
+
+### 9.2 Run the optimizer
+
+```bash
+python ~/.config/opencode/workflow-creator/scripts/optimize_descriptions.py \
+  --agent <name> \
+  --evals .opencode/<name>-trigger-evals.json \
+  --model ollama/qwen3.5:9b \
+  --iterations 3
+```
+
+The script scores the current description, proposes improvements based on failures, and iterates. At the end it asks you to confirm before writing the new description.
+
+Only run this after the agent's behavior is stable — description optimization is the last step.
+
+---
+
 ## workflow.yml management
 
 Always keep `workflow.yml` up to date. Every change to an agent's role, calls list, or mock responses should be reflected there. The workflow.yml is the single source of truth for:
@@ -314,3 +345,4 @@ See `references/workflow_schema.md` for the full schema.
 - `scripts/teardown_dev_agent.py` — DEV agent cleanup
 - `scripts/mock_mcp_server.py` — Mock MCP server
 - `scripts/read_logs.py` — OpenCode session log parser
+- `scripts/optimize_descriptions.py` — Agent description trigger optimizer

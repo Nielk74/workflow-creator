@@ -27,11 +27,10 @@
 - [x] `workflow-analyzer.md` subagent — checks topology, boundaries, tool permissions, model assignments, depth/recursion, mock coverage. Produces structured report + topology diagram.
 - [x] Stage 8 (workflow-level eval) added to SKILL.md — run real workflow vs Build baseline, evaluate with read_logs.py
 
-## Phase 4 — Description optimizer (port from skill-creator)
-- [ ] Port the trigger eval concept to agent descriptions
-  - Agents auto-trigger based on their description field
-  - Especially relevant for subagents invoked implicitly
-- [ ] Write a lightweight eval loop: generate trigger/no-trigger prompts, score, iterate
+## Phase 4 — Description optimizer ✓
+- [x] `optimize_descriptions.py` — scores description against trigger/no-trigger eval set, proposes improvements, iterates up to N times, asks to confirm before writing
+- [x] Trigger eval schema added to `references/workflow_schema.md`
+- [x] Stage 9 added to SKILL.md
 
 ## Phase 5 — Polish
 - [ ] `workflow-creator install` script: copies scripts to ~/.config/opencode/workflow-creator/
