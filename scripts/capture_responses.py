@@ -91,38 +91,39 @@ def extract_response(conn: sqlite3.Connection, sid: str) -> tuple[str, str]:
     return user_prompt, assistant_response
 
 
-def update_workflow(workflow_path: str, agent_name: str, captures: list[dict], dry_run: bool):
-    """Write captured responses into workflow.yml mock_responses."""
-    path = Path(workflow_path)
-    with open(path) as f:
-        wf = yaml.safe_load(f)
-
-    mock_responses = wf.setdefault("mock_responses", {})
+def build_entries(captures: list[dict]) -> list[dict]:
     entries = []
+    seen_triggers = set()
+    stopwords = {"summarize", "section", "following", "please", "about", "using", "which"}
 
     for cap in captures:
         if not cap["response"]:
             continue
-        # Build a trigger from the prompt — use a keyword excerpt (first 4 meaningful words)
-        words = re.findall(r'\b\w{4,}\b', cap["prompt"].lower())
+        words = re.findall(r'\b\w{5,}\b', cap["prompt"].lower())
+        words = [w for w in words if w not in stopwords]
         trigger = "|".join(f".*{w}.*" for w in words[:3]) if words else ".*"
-        entries.append({
-            "trigger": trigger,
-            "response": cap["response"]
-        })
+        if trigger in seen_triggers:
+            continue
+        seen_triggers.add(trigger)
+        entries.append({"trigger": trigger, "response": cap["response"]})
 
-    # Always add a catch-all using the last captured response
     if entries:
         last_response = entries[-1]["response"]
-        # Remove duplicates of catch-all
         entries = [e for e in entries if e["trigger"] != ".*"]
         entries.append({"trigger": ".*", "response": last_response})
 
+    return entries
+
+
+def update_workflow(workflow_path: str, agent_name: str, captures: list[dict], dry_run: bool):
+    """Surgically update only mock_responses.<agent_name>, preserving the rest of the file."""
+    path = Path(workflow_path)
+    original = path.read_text(encoding="utf-8")
+
+    entries = build_entries(captures)
     if not entries:
         print(f"No responses captured for '{agent_name}' — nothing to write.")
         return
-
-    mock_responses[agent_name] = entries
 
     if dry_run:
         print(f"\n[DRY RUN] Would write to mock_responses.{agent_name}:\n")
@@ -132,9 +133,28 @@ def update_workflow(workflow_path: str, agent_name: str, captures: list[dict], d
             print()
         return
 
-    with open(path, "w") as f:
-        yaml.dump(wf, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    # Build indented YAML block for this agent's entries (2-space indent under mock_responses)
+    raw_block = yaml.dump(
+        {agent_name: entries},
+        default_flow_style=False, allow_unicode=True, sort_keys=False
+    )
+    indented = "\n".join("  " + l if l.strip() else l for l in raw_block.splitlines())
 
+    # Replace existing agent block, or append under mock_responses, or add the whole section
+    agent_re = re.compile(
+        rf'^  {re.escape(agent_name)}:\n(?:(?:  [ \-#].*|)\n)*',
+        re.MULTILINE
+    )
+    mock_section_re = re.compile(r'^(mock_responses:\n)', re.MULTILINE)
+
+    if agent_re.search(original):
+        updated = agent_re.sub(indented + "\n", original)
+    elif mock_section_re.search(original):
+        updated = mock_section_re.sub(r'\1' + indented + "\n", original, count=1)
+    else:
+        updated = original.rstrip() + f"\nmock_responses:\n{indented}\n"
+
+    path.write_text(updated, encoding="utf-8")
     print(f"Written {len(entries)} mock response(s) for '{agent_name}' to {path}")
 
 
@@ -169,7 +189,9 @@ def main():
         print("No usable responses found. Make sure the agent sessions completed successfully.")
         sys.exit(1)
 
-    update_workflow(args.workflow, args.agent, captures, args.dry_run)
+    # Strip DEV_ prefix when writing to workflow.yml — mocks are keyed by real agent name
+    mock_key = args.agent.removeprefix("DEV_")
+    update_workflow(args.workflow, mock_key, captures, args.dry_run)
 
 
 if __name__ == "__main__":
