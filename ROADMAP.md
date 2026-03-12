@@ -23,13 +23,9 @@
 - [x] Mock MCP server validated end-to-end: mock_sum_specialist called 3x with correct section prompts. Tool part type is "tool" (not "tool-input"), state.input holds args. Fixed read_logs.py and mock_mcp_server.py accordingly.
 - [x] Hyphen sanitization: agent names with hyphens (e.g. sum-specialist) → tool names use underscores (mock_sum_specialist). Fixed in setup_dev_agent.py and mock_mcp_server.py.
 
-## Phase 3 — Workflow analysis agent
-- [ ] Add `workflow-analyzer.md` subagent
-  - Reads all agent .md files + workflow.yml
-  - Detects: overlap, gaps, excessive depth, over-privileged tools
-  - Proposes topology changes
-- [ ] Add workflow-level eval: run a full end-to-end prompt through the real workflow,
-  compare against baseline (no agents, just Build)
+## Phase 3 — Workflow analysis agent ✓
+- [x] `workflow-analyzer.md` subagent — checks topology, boundaries, tool permissions, model assignments, depth/recursion, mock coverage. Produces structured report + topology diagram.
+- [x] Stage 8 (workflow-level eval) added to SKILL.md — run real workflow vs Build baseline, evaluate with read_logs.py
 
 ## Phase 4 — Description optimizer (port from skill-creator)
 - [ ] Port the trigger eval concept to agent descriptions

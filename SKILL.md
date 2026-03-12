@@ -250,16 +250,44 @@ This removes `DEV_<name>.md` and cleans up mock config.
 
 ## Stage 7 — Workflow-level Analysis
 
-After all agents are individually tested, analyze the workflow holistically.
+After all agents are individually tested, run the workflow analyzer:
 
-Read all agent files + `workflow.yml`. Then consider:
-- Are agent boundaries well-defined? Any overlap or gaps?
-- Are orchestrator delegation prompts clear enough for each specialist?
-- Are there unnecessary hops? Could two agents be merged?
-- Is the depth limit appropriate for the recursion topology?
-- Are tool permissions well-scoped? (read-only agents shouldn't have write: true)
+```
+Read agents/workflow-analyzer.md and analyze this workflow.
+workflow.yml: <path>
+Agents directory: ~/.config/opencode/agents/
+Recent test log summaries: <paste any read_logs.py output worth including>
+```
 
-Present findings as a structured report. Ask the user if they want to apply any restructuring.
+The analyzer checks topology, agent boundaries, tool permissions, model assignments, depth/recursion, and mock coverage. It returns a structured report with a topology diagram.
+
+Present the findings to the user. Ask if they want to apply any of the suggested restructuring before considering the workflow done.
+
+---
+
+## Stage 8 — Workflow-level Eval
+
+Once individual agents pass and the topology is clean, run a full end-to-end test:
+
+1. Ask the user to run the **real** workflow (not DEV_) in their terminal:
+   ```bash
+   opencode run --agent <orchestrator-name> "<realistic end-to-end prompt>"
+   ```
+
+2. Read the session logs:
+   ```bash
+   python ~/.config/opencode/workflow-creator/scripts/read_logs.py --agent <orchestrator-name> --last 1
+   ```
+
+3. Compare against baseline — ask the user to run the same prompt with the default Build agent:
+   ```bash
+   opencode run "same prompt"
+   ```
+   Then read that session too.
+
+4. Evaluate the difference: did the workflow produce a better, more structured result than Build alone? Were the right specialists invoked? Was the output well-organized?
+
+If the workflow isn't clearly better than baseline for this prompt, go back to Stage 6 and improve the orchestrator's delegation strategy.
 
 ---
 
@@ -281,6 +309,7 @@ See `references/workflow_schema.md` for the full schema.
 - `references/opencode_agents.md` — OpenCode agent frontmatter reference
 - `agents/evaluator.md` — Instructions for the evaluator subagent
 - `agents/optimizer.md` — Instructions for the optimizer subagent
+- `agents/workflow-analyzer.md` — Holistic workflow topology and boundary analysis
 - `scripts/setup_dev_agent.py` — DEV agent setup
 - `scripts/teardown_dev_agent.py` — DEV agent cleanup
 - `scripts/mock_mcp_server.py` — Mock MCP server
