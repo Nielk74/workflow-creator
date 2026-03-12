@@ -84,11 +84,12 @@ def summarize_session(conn: sqlite3.Connection, sid: str, agent_name: str) -> di
             ptype = p.get("type", "")
             text = p.get("text", "")
 
-            if ptype == "tool-input":
-                name = p.get("toolName", p.get("name", ""))
-                inp = p.get("input", {})
+            if ptype == "tool":
+                state = p.get("state", {})
+                name = p.get("tool", p.get("toolName", ""))
+                inp = state.get("input", {})
                 step_count += 1
-                if name.startswith("mock_"):
+                if "mock_" in name:
                     mock_calls.append({"tool": name, "prompt": inp.get("prompt", str(inp))[:300]})
                 else:
                     tool_calls.append({"tool": name, "input_summary": str(inp)[:200]})

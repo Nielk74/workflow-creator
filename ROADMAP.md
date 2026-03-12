@@ -20,8 +20,8 @@
 - [x] Confirmed session export format via `opencode export <id>` — messages have `info.role`, `info.tokens`, `parts[]` with `type/text` fields. read_logs.py updated accordingly.
 - [x] Validated DEV_sum-specialist with ollama/qwen3.5:9b — model responded correctly
 - [x] Confirmed storage: ~/.local/share/opencode/opencode.db (SQLite). Tables: session, message, part — all data in JSON `data` column. `opencode export` only works with a running server; DB direct access works always. read_logs.py rewritten to query SQLite directly.
-- [ ] Test mock_mcp_server.py against a real OpenCode agent session (MCP tool schema validation)
-- [ ] Test setup_dev_agent.py end-to-end with a 2-agent workflow where subagents use mock tools
+- [x] Mock MCP server validated end-to-end: mock_sum_specialist called 3x with correct section prompts. Tool part type is "tool" (not "tool-input"), state.input holds args. Fixed read_logs.py and mock_mcp_server.py accordingly.
+- [x] Hyphen sanitization: agent names with hyphens (e.g. sum-specialist) → tool names use underscores (mock_sum_specialist). Fixed in setup_dev_agent.py and mock_mcp_server.py.
 
 ## Phase 3 — Workflow analysis agent
 - [ ] Add `workflow-analyzer.md` subagent

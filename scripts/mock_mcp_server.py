@@ -59,8 +59,9 @@ def build_server(mock_responses: dict) -> Server:
     async def list_tools() -> list[types.Tool]:
         tools = []
         for agent_name in mock_responses:
+            tool_name = "mock_" + agent_name.replace("-", "_")
             tools.append(types.Tool(
-                name=f"mock_{agent_name}",
+                name=tool_name,
                 description=f"Mock response for @{agent_name} subagent during DEV testing",
                 inputSchema={
                     "type": "object",
@@ -81,7 +82,12 @@ def build_server(mock_responses: dict) -> Server:
         if not name.startswith("mock_"):
             raise ValueError(f"Unknown tool: {name}")
 
-        agent_name = name[5:]  # strip "mock_"
+        # Reverse sanitization: tool name uses underscores, keys may use hyphens
+        raw = name[5:]  # strip "mock_"
+        agent_name = raw
+        if agent_name not in mock_responses:
+            # try hyphenated version
+            agent_name = raw.replace("_", "-")
         if agent_name not in mock_responses:
             return [types.TextContent(type="text", text=f"(no mock configured for {agent_name})")]
 

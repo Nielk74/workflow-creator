@@ -57,10 +57,11 @@ def rewrite_agent_prompt(content: str, calls: list) -> str:
         content = re.sub(r'^(---\n)', r'\1mode: all\n', content, count=1)
 
     for called_agent in calls:
+        tool_name = "mock_" + called_agent.replace("-", "_")
         # Replace @agentname with instruction to use mock tool
         content = re.sub(
             rf"@{re.escape(called_agent)}\b",
-            f"[use mock_{called_agent} tool]",
+            f"[use {tool_name} tool]",
             content
         )
 
@@ -73,7 +74,8 @@ def rewrite_agent_prompt(content: str, calls: list) -> str:
         mock_note = "\n\n> **DEV MODE**: You are running in isolation testing mode.\n"
         mock_note += "> Instead of calling subagents directly, use these MCP mock tools:\n"
         for a in calls:
-            mock_note += f"> - `mock_{a}(prompt)` — simulates @{a}\n"
+            tool_name = "mock_" + a.replace("-", "_")
+            mock_note += f"> - `{tool_name}(prompt)` — simulates @{a}\n"
         mock_note += "> These tools return pre-configured test responses.\n"
         insert_at = frontmatter_end + 4  # after closing ---\n
         content = content[:insert_at] + mock_note + content[insert_at:]
