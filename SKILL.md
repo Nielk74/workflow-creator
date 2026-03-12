@@ -144,13 +144,50 @@ ls ~/.config/opencode/agents/
 
 ---
 
-## Stage 4 — Test an Agent in Isolation
+## Stage 4 — Test Agents in Isolation
 
-Testing one agent means: run it with realistic inputs, while mocking all its subagent dependencies.
+Test agents bottom-up: leaf agents first (no subagents), then capture their real responses to use as mocks for agents higher in the topology.
 
-### 4.1 Setup the DEV agent
+### 4.1 Identify the test order
 
-Run the setup script:
+From `workflow.yml`, build the order: agents with no `calls` go first (leaves), then agents that call only leaves, and so on up to the orchestrator last.
+
+Example for a 3-level workflow:
+```
+1. leaf agents    (calls: [])         → test directly, no mock needed
+2. mid agents     (calls: [leaf])     → test with captured leaf responses as mocks
+3. orchestrator   (calls: [mid, ...]) → test with captured mid responses as mocks
+```
+
+### 4.2 Test leaf agents (no mock needed)
+
+For each leaf agent, ask the user to run 2–3 realistic prompts in their terminal:
+```bash
+opencode run --agent <leaf-agent-name> "realistic prompt"
+```
+
+After each run, verify the output looks correct with:
+```bash
+python ~/.config/opencode/workflow-creator/scripts/read_logs.py --agent <leaf-agent-name> --last 1
+```
+
+### 4.3 Capture real responses as mocks
+
+Once a leaf agent has been tested and its outputs look good, capture them into `workflow.yml`:
+```bash
+python ~/.config/opencode/workflow-creator/scripts/capture_responses.py \
+  --agent <leaf-agent-name> \
+  --workflow <path-to-workflow.yml> \
+  --last 3
+```
+
+This reads the last 3 sessions for that agent from the SQLite DB and writes them as `mock_responses` entries, with auto-generated triggers based on the prompts used. Review the result in `workflow.yml` and adjust triggers if needed — always ensure there is a catch-all `".*"` entry.
+
+Use `--dry-run` to preview before writing.
+
+### 4.4 Setup the DEV agent for the next level
+
+Once mocks are populated for all subagents an agent calls, run setup:
 ```bash
 python ~/.config/opencode/workflow-creator/scripts/setup_dev_agent.py \
   --agent <name> \
@@ -159,27 +196,11 @@ python ~/.config/opencode/workflow-creator/scripts/setup_dev_agent.py \
 
 This script:
 - Copies `~/.config/opencode/agents/<name>.md` to `~/.config/opencode/agents/DEV_<name>.md`
-- Replaces all `@subagent` references in the prompt with "use the mock_<subagent> tool"
+- Rewrites `@subagent` mentions to `[use mock_<subagent> tool]`
 - Writes `.opencode/mock_responses.yml` from `workflow.yml` mock_responses
-- Adds the Mock MCP to `~/.config/opencode/opencode.json` (global) if not already present
+- Adds the Mock MCP to `~/.config/opencode/opencode.json` if not already present
 
-### 4.2 Write mock responses
-
-In `workflow.yml`, add `mock_responses` for each subagent this agent calls:
-```yaml
-mock_responses:
-  analyzer:
-    - trigger: ".*"
-      response: "Analysis complete: found 3 issues — 1 critical, 2 warnings."
-  fixer:
-    - trigger: "critical.*"
-      response: "Fixed: replaced null check with optional chaining."
-    - trigger: ".*"
-      response: "Fix applied successfully."
-```
-Triggers are regex patterns matched against the prompt. First match wins. Always include a catch-all `".*"`.
-
-### 4.3 Run the DEV agent
+### 4.5 Run the DEV agent
 
 `opencode run` requires a real terminal (TTY) — it cannot be driven as a background subprocess. Ask the user to open a new terminal window and run the test prompt inline:
 
@@ -191,7 +212,7 @@ OpenCode always reads the latest config on startup, so no restart is needed afte
 
 Prepare 2–3 realistic test prompts. Run them one at a time. After each run, ask the user to come back here — then read the session logs with `opencode session list` + `opencode export <id>`.
 
-### 4.4 Read session logs
+### 4.6 Read session logs
 
 ```bash
 python ~/.config/opencode/workflow-creator/scripts/read_logs.py --agent DEV_<name> --last 1
@@ -351,5 +372,6 @@ See `references/workflow_schema.md` for the full schema.
 - `scripts/mock_mcp_server.py` — Mock MCP server
 - `scripts/read_logs.py` — OpenCode session log parser
 - `scripts/optimize_descriptions.py` — Agent description trigger optimizer
+- `scripts/capture_responses.py` — Captures real agent responses from SQLite DB into workflow.yml mock_responses
 - `scripts/validate_workflow.py` — Validates workflow.yml structure before testing
 - `scripts/install.py` — Copies skill assets to ~/.config/opencode/workflow-creator/
