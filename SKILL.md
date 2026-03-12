@@ -45,6 +45,11 @@ Design the agent team:
 
 Write or update `workflow.yml` in `.opencode/` (project-scoped context) or confirm with user if they want it elsewhere. See `references/workflow_schema.md` for the full schema.
 
+After writing, validate it:
+```bash
+python ~/.config/opencode/workflow-creator/scripts/validate_workflow.py --workflow .opencode/workflow.yml
+```
+
 Example minimal design:
 ```yaml
 name: code-review-workflow
@@ -346,3 +351,5 @@ See `references/workflow_schema.md` for the full schema.
 - `scripts/mock_mcp_server.py` — Mock MCP server
 - `scripts/read_logs.py` — OpenCode session log parser
 - `scripts/optimize_descriptions.py` — Agent description trigger optimizer
+- `scripts/validate_workflow.py` — Validates workflow.yml structure before testing
+- `scripts/install.py` — Copies skill assets to ~/.config/opencode/workflow-creator/

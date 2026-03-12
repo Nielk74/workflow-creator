@@ -32,9 +32,9 @@
 - [x] Trigger eval schema added to `references/workflow_schema.md`
 - [x] Stage 9 added to SKILL.md
 
-## Phase 5 — Polish
-- [ ] `workflow-creator install` script: copies scripts to ~/.config/opencode/workflow-creator/
-- [ ] Add workflow.yml validation (check: all `calls` references exist as agent names, etc.)
+## Phase 5 — Polish ✓
+- [x] `install.py` — copies scripts/agents/references to ~/.config/opencode/workflow-creator/
+- [x] `validate_workflow.py` — checks calls resolution, orphans, recursion cycles, mock coverage, catch-all triggers
 - [ ] Add example workflows in examples/ directory
 - [ ] Consider a `--dry-run` mode for setup_dev_agent.py
 
