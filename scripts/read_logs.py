@@ -2,10 +2,7 @@
 """
 Parses OpenCode session logs for a given agent and outputs a structured summary.
 
-OpenCode stores session logs as JSONL files. Common locations:
-  - ~/.local/share/opencode/sessions/   (Linux)
-  - ~/Library/Application Support/opencode/sessions/  (macOS)
-  - %APPDATA%/opencode/sessions/  (Windows → ~/AppData/Roaming/opencode/sessions/)
+Uses `opencode session list` and `opencode export <id>` to retrieve session data.
 
 Usage:
     python read_logs.py --agent DEV_<name> [--last N] [--session-id <id>]
@@ -13,119 +10,119 @@ Usage:
 
 import argparse
 import json
-import os
+import re
+import subprocess
 import sys
-from datetime import datetime
-from pathlib import Path
 
 
-def find_sessions_dir() -> Path:
-    candidates = [
-        Path.home() / ".local" / "share" / "opencode" / "sessions",
-        Path.home() / "Library" / "Application Support" / "opencode" / "sessions",
-        Path.home() / "AppData" / "Roaming" / "opencode" / "sessions",
-    ]
-    for c in candidates:
-        if c.exists():
-            return c
-    # Fallback: search home for opencode sessions
-    for c in Path.home().rglob("opencode/sessions"):
-        if c.is_dir():
-            return c
-    return None
+def run_cmd(args: list) -> str:
+    result = subprocess.run(args, capture_output=True, text=True)
+    return result.stdout.strip()
 
 
-def find_session_files(sessions_dir: Path, agent_name: str, last_n: int) -> list[Path]:
-    """Find the most recent session files that mention the given agent."""
-    all_files = sorted(sessions_dir.rglob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True)
-    if not all_files:
-        all_files = sorted(sessions_dir.rglob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True)
+def list_sessions() -> list[dict]:
+    """Get sessions via `opencode session list` — output is plain text, parse it."""
+    raw = run_cmd(["opencode", "session", "list"])
+    if not raw or "No sessions" in raw:
+        return []
 
-    matching = []
-    for f in all_files:
-        try:
-            content = f.read_text(encoding="utf-8", errors="ignore")
-            if agent_name.lower() in content.lower():
-                matching.append(f)
-                if len(matching) >= last_n:
-                    break
-        except Exception:
-            continue
+    sessions = []
+    # Try JSON first
+    try:
+        data = json.loads(raw)
+        if isinstance(data, list):
+            return data
+    except json.JSONDecodeError:
+        pass
 
-    if not matching:
-        # Fall back to just the most recent N files
-        return all_files[:last_n]
-    return matching
-
-
-def parse_session(file_path: Path) -> list[dict]:
-    """Parse a JSONL or JSON session file into a list of events."""
-    events = []
-    content = file_path.read_text(encoding="utf-8", errors="ignore")
-
-    # Try JSONL first
-    for line in content.splitlines():
+    # Parse plain text lines: look for session IDs (typically UUIDs or short hashes)
+    for line in raw.splitlines():
         line = line.strip()
         if not line:
             continue
-        try:
-            events.append(json.loads(line))
-        except json.JSONDecodeError:
-            pass
+        # Match lines that contain a session ID pattern
+        match = re.search(r'([a-f0-9\-]{8,})', line, re.IGNORECASE)
+        if match:
+            sessions.append({"id": match.group(1), "raw": line})
 
-    # Fallback: try full JSON array
-    if not events:
-        try:
-            data = json.loads(content)
-            if isinstance(data, list):
-                events = data
-            elif isinstance(data, dict):
-                events = [data]
-        except json.JSONDecodeError:
-            pass
-
-    return events
+    return sessions
 
 
-def summarize_session(events: list[dict], agent_name: str) -> dict:
-    """Extract meaningful signal from session events."""
+def export_session(session_id: str) -> dict | None:
+    """Export a session as JSON via `opencode export <id>`."""
+    raw = run_cmd(["opencode", "export", session_id])
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        # Sometimes export writes to a file — check if it printed a path
+        path_match = re.search(r'[\w/\\:.-]+\.json', raw)
+        if path_match:
+            try:
+                with open(path_match.group(0)) as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        print(f"Warning: could not parse export output for session {session_id}", file=sys.stderr)
+        return None
+
+
+def session_mentions_agent(session: dict, agent_name: str) -> bool:
+    """Check if a session involves the given agent."""
+    text = json.dumps(session).lower()
+    return agent_name.lower() in text
+
+
+def summarize_session(session: dict, agent_name: str) -> dict:
+    """Extract meaningful signal from an exported session."""
     tool_calls = []
     mock_calls = []
     errors = []
     final_response = None
     step_count = 0
 
-    for event in events:
-        event_type = event.get("type", event.get("role", ""))
+    # Session export structure varies — handle common shapes
+    messages = session.get("messages", session.get("turns", session.get("events", [])))
+    if isinstance(session, list):
+        messages = session
 
-        # Tool use
-        if event_type in ("tool_use", "tool_call") or "tool_use" in event.get("content", [{}])[0].get("type", "") if isinstance(event.get("content"), list) else False:
-            content = event.get("content", [])
-            if isinstance(content, list):
-                for block in content:
-                    if isinstance(block, dict) and block.get("type") == "tool_use":
-                        name = block.get("name", "")
-                        inp = block.get("input", {})
-                        if name.startswith("mock_"):
-                            mock_calls.append({"tool": name, "prompt": inp.get("prompt", "")[:200]})
-                        else:
-                            tool_calls.append({"tool": name, "input_summary": str(inp)[:200]})
-                        step_count += 1
+    for msg in messages:
+        role = msg.get("role", msg.get("type", ""))
+        content = msg.get("content", "")
 
-        # Errors
-        if event_type == "error" or "error" in str(event).lower()[:50]:
-            errors.append(str(event)[:300])
+        # Tool use blocks
+        if isinstance(content, list):
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                btype = block.get("type", "")
+                if btype == "tool_use":
+                    name = block.get("name", "")
+                    inp = block.get("input", {})
+                    step_count += 1
+                    if name.startswith("mock_"):
+                        mock_calls.append({
+                            "tool": name,
+                            "prompt": inp.get("prompt", str(inp))[:300]
+                        })
+                    else:
+                        tool_calls.append({
+                            "tool": name,
+                            "input_summary": str(inp)[:200]
+                        })
+                elif btype == "text" and role == "assistant":
+                    text = block.get("text", "")
+                    if len(text) > 20:
+                        final_response = text[:1000]
 
-        # Assistant final message
-        if event_type in ("assistant", "message") and event.get("role") == "assistant":
-            content = event.get("content", "")
-            if isinstance(content, str) and len(content) > 20:
-                final_response = content[:1000]
-            elif isinstance(content, list):
-                for block in content:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        final_response = block.get("text", "")[:1000]
-                        break
+        # Plain text assistant message
+        elif role == "assistant" and isinstance(content, str) and len(content) > 20:
+            final_response = content[:1000]
+
+        # Error events
+        if role == "error" or "error" in str(msg).lower()[:80]:
+            errors.append(str(msg)[:300])
 
     return {
         "agent": agent_name,
@@ -137,9 +134,9 @@ def summarize_session(events: list[dict], agent_name: str) -> dict:
     }
 
 
-def print_summary(summary: dict, session_file: Path):
+def print_summary(summary: dict, session_id: str):
     print(f"\n{'='*60}")
-    print(f"Session: {session_file.name}")
+    print(f"Session: {session_id}")
     print(f"Agent:   {summary['agent']}")
     print(f"Steps:   {summary['steps']}")
     print()
@@ -165,7 +162,7 @@ def print_summary(summary: dict, session_file: Path):
         print(f"\nFinal response (truncated at 1000 chars):")
         print(f"  {summary['final_response']}")
     else:
-        print("\nFinal response: (not found)")
+        print("\nFinal response: (not found in export)")
 
     print(f"{'='*60}")
 
@@ -173,26 +170,42 @@ def print_summary(summary: dict, session_file: Path):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--agent", required=True, help="Agent name to filter for (e.g. DEV_analyzer)")
-    parser.add_argument("--last", type=int, default=1, help="Number of most recent sessions to show")
-    parser.add_argument("--sessions-dir", help="Override sessions directory path")
+    parser.add_argument("--last", type=int, default=1, help="Number of most recent matching sessions to show")
+    parser.add_argument("--session-id", help="Export a specific session by ID")
     args = parser.parse_args()
 
-    sessions_dir = Path(args.sessions_dir) if args.sessions_dir else find_sessions_dir()
-    if not sessions_dir or not sessions_dir.exists():
-        print(f"OpenCode sessions directory not found. Try --sessions-dir <path>", file=sys.stderr)
+    if args.session_id:
+        session = export_session(args.session_id)
+        if not session:
+            print(f"Could not export session {args.session_id}", file=sys.stderr)
+            sys.exit(1)
+        summary = summarize_session(session, args.agent)
+        print_summary(summary, args.session_id)
+        return
+
+    sessions = list_sessions()
+    if not sessions:
+        print("No sessions found. Run a test first with:", file=sys.stderr)
+        print(f"  opencode run --agent DEV_{args.agent} \"<test prompt>\"", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Sessions dir: {sessions_dir}")
+    matched = 0
+    for s in sessions:
+        sid = s.get("id", s.get("sessionId", "unknown"))
+        session_data = export_session(sid)
+        if session_data is None:
+            continue
+        if not session_mentions_agent(session_data, args.agent):
+            continue
+        summary = summarize_session(session_data, args.agent)
+        print_summary(summary, sid)
+        matched += 1
+        if matched >= args.last:
+            break
 
-    files = find_session_files(sessions_dir, args.agent, args.last)
-    if not files:
-        print(f"No session files found for agent '{args.agent}'", file=sys.stderr)
-        sys.exit(1)
-
-    for f in files:
-        events = parse_session(f)
-        summary = summarize_session(events, args.agent)
-        print_summary(summary, f)
+    if matched == 0:
+        print(f"No sessions found mentioning agent '{args.agent}'.", file=sys.stderr)
+        print("Try --session-id <id> to inspect a specific session.", file=sys.stderr)
 
 
 if __name__ == "__main__":

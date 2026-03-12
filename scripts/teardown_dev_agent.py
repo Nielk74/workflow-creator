@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 
 AGENTS_DIR = Path.home() / ".config" / "opencode" / "agents"
-OPENCODE_CONFIG = Path.home() / ".config" / "opencode" / "config.json"
+OPENCODE_CONFIG = Path.home() / ".config" / "opencode" / "opencode.json"
 
 
 def main():

@@ -10,15 +10,15 @@
 - [x] mock_mcp_server.py — dynamic MCP server from mock_responses.yml
 - [x] read_logs.py — OpenCode session log parser
 
-## Phase 2 — Validate & harden (next)
-- [ ] Test mock_mcp_server.py against a real OpenCode agent session
-  - Verify MCP tool schema is correct for OpenCode's MCP client
-  - Confirm `opencode --agent DEV_xxx` is valid CLI syntax (check opencode --help)
-- [ ] Validate read_logs.py against actual OpenCode session log format
-  - Find where OpenCode stores sessions on Windows/macOS/Linux
-  - Confirm JSONL structure / field names
+## Phase 2 — Validate & harden (in progress)
+- [x] Confirm CLI: non-interactive run is `opencode run --agent DEV_xxx "<prompt>"`
+- [x] Confirm config file is `opencode.json` (not `config.json`), global at `~/.config/opencode/opencode.json`
+- [x] Confirm MCP command format: `"command": ["python", "path", "--arg", "val"]` (array, not string+args)
+- [x] Session data: use `opencode session list` + `opencode export <id>` (not raw file parsing)
+- [x] Fixed setup_dev_agent.py, teardown_dev_agent.py, read_logs.py, SKILL.md accordingly
+- [ ] Test mock_mcp_server.py against a real OpenCode agent session (MCP tool schema validation)
 - [ ] Test setup_dev_agent.py end-to-end with a simple 2-agent workflow
-- [ ] Confirm opencode.json MCP config format is correct
+- [ ] Validate read_logs.py output against a real `opencode export` JSON structure
 
 ## Phase 3 — Workflow analysis agent
 - [ ] Add `workflow-analyzer.md` subagent

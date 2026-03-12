@@ -26,7 +26,7 @@ except ImportError:
     sys.exit(1)
 
 AGENTS_DIR = Path.home() / ".config" / "opencode" / "agents"
-OPENCODE_CONFIG = Path.home() / ".config" / "opencode" / "config.json"
+OPENCODE_CONFIG = Path.home() / ".config" / "opencode" / "opencode.json"
 MOCK_SERVER_PATH = Path(__file__).parent / "mock_mcp_server.py"
 
 
@@ -110,12 +110,8 @@ def add_mock_mcp_to_config(mock_config_path: Path):
 
     mcp_section["mock-agents"] = {
         "type": "local",
-        "command": "python",
-        "args": [
-            str(MOCK_SERVER_PATH),
-            "--config",
-            str(mock_config_path.resolve())
-        ]
+        "command": ["python", str(MOCK_SERVER_PATH), "--config", str(mock_config_path.resolve())],
+        "timeout": 15000
     }
 
     OPENCODE_CONFIG.parent.mkdir(parents=True, exist_ok=True)

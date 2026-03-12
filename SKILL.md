@@ -156,7 +156,7 @@ This script:
 - Copies `~/.config/opencode/agents/<name>.md` to `~/.config/opencode/agents/DEV_<name>.md`
 - Replaces all `@subagent` references in the prompt with "use the mock_<subagent> tool"
 - Writes `.opencode/mock_responses.yml` from `workflow.yml` mock_responses
-- Adds the Mock MCP to `~/.config/opencode/config.json` if not already present
+- Adds the Mock MCP to `~/.config/opencode/opencode.json` (global) if not already present
 
 ### 4.2 Write mock responses
 
@@ -177,10 +177,10 @@ Triggers are regex patterns matched against the prompt. First match wins. Always
 ### 4.3 Run the DEV agent
 
 ```bash
-opencode --agent DEV_<name> "<test prompt>"
+opencode run --agent DEV_<name> "<test prompt>"
 ```
 
-OpenCode will load the updated config (including Mock MCP) on startup, so no manual restart needed — the bash invocation always picks up the latest config.
+`opencode run` is non-interactive and always reads the latest `opencode.json` on startup, so no manual restart needed — config changes are picked up automatically.
 
 Prepare 2–3 realistic test prompts. Run them one at a time. After each run, read the session logs.
 
