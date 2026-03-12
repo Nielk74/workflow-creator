@@ -1,0 +1,70 @@
+name: research-writer
+description: Researches a topic via web search, distills findings, and writes a structured document
+version: 1
+max_depth: 1
+
+agents:
+  - name: rw-orchestrator
+    file: rw-orchestrator.md
+    mode: primary
+    model: ollama/qwen3.5:9b
+    calls: [searcher, summarizer, writer]
+
+  - name: searcher
+    file: searcher.md
+    mode: subagent
+    model: ollama/qwen3.5:9b
+    calls: []
+
+  - name: summarizer
+    file: summarizer.md
+    mode: subagent
+    model: ollama/qwen3.5:9b
+    calls: []
+
+  - name: writer
+    file: writer.md
+    mode: subagent
+    model: ollama/qwen3.5:9b
+    calls: []
+
+mock_responses:
+  searcher:
+    - trigger: ".*"
+      response: |
+        Found 4 relevant sources:
+        1. "Introduction to Retrieval-Augmented Generation" (arXiv 2023) — explains RAG pipeline: retriever + reader, use of vector DBs
+        2. "RAG vs Fine-tuning" (Towards Data Science) — RAG preferred when knowledge changes frequently; fine-tuning better for style/format
+        3. "Production RAG systems" (LangChain blog) — chunking strategy, embedding models, re-ranking for accuracy
+        4. "Limitations of RAG" (ML research blog) — hallucination still possible, retrieval quality bottleneck, latency tradeoffs
+
+  summarizer:
+    - trigger: ".*"
+      response: |
+        Key findings:
+        - RAG combines a retriever (vector search) with a language model reader
+        - Preferred over fine-tuning when knowledge base changes frequently
+        - Critical factors: chunk size, embedding quality, re-ranking
+        - Main limitations: retrieval bottleneck, latency, residual hallucination risk
+
+  writer:
+    - trigger: ".*"
+      response: |
+        # Retrieval-Augmented Generation (RAG)
+
+        ## What is RAG?
+        RAG is a technique that combines vector search with language model generation,
+        allowing models to answer questions grounded in an external knowledge base.
+
+        ## When to use RAG
+        Use RAG when your knowledge base changes frequently and fine-tuning would be
+        too slow or expensive to keep up.
+
+        ## Key considerations
+        - Chunk size and overlap affect retrieval precision
+        - Re-ranking improves answer quality significantly
+        - Embedding model choice impacts both speed and accuracy
+
+        ## Limitations
+        Retrieval quality is the main bottleneck. Poor chunks lead to poor answers
+        regardless of model quality. Latency is higher than vanilla generation.

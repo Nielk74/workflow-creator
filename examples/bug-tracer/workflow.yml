@@ -1,0 +1,80 @@
+name: bug-tracer
+description: Investigates a bug report by running parallel investigation tracks then synthesizing a fix plan
+version: 1
+max_depth: 2
+
+agents:
+  - name: bt-orchestrator
+    file: bt-orchestrator.md
+    mode: primary
+    model: ollama/qwen3.5:9b
+    calls: [bt-reproducer, bt-log-analyzer, bt-code-analyzer, bt-fixer]
+
+  - name: bt-reproducer
+    file: bt-reproducer.md
+    mode: subagent
+    model: ollama/qwen3.5:9b
+    calls: []
+
+  - name: bt-log-analyzer
+    file: bt-log-analyzer.md
+    mode: subagent
+    model: ollama/qwen3.5:9b
+    calls: []
+
+  - name: bt-code-analyzer
+    file: bt-code-analyzer.md
+    mode: subagent
+    model: ollama/qwen3.5:9b
+    calls: []
+
+  - name: bt-fixer
+    file: bt-fixer.md
+    mode: subagent
+    model: ollama/qwen3.5:9b
+    calls: [bt-orchestrator]
+    max_recursive_depth: 1
+
+mock_responses:
+  bt-reproducer:
+    - trigger: ".*"
+      response: |
+        Reproduction steps confirmed:
+        1. POST /api/orders with item quantity > 1000
+        2. Server returns 500 with no body
+        3. Database shows partial insert — order created but line items missing
+        Consistent across 3 attempts. Fails only when quantity exceeds 1000.
+        Hypothesis: integer overflow or DB constraint violation on quantity field.
+
+  bt-log-analyzer:
+    - trigger: ".*"
+      response: |
+        Error in logs (2026-03-10 14:23:11):
+        ERROR [OrderService] DataTruncationError: Out of range value for column 'quantity' at row 1
+        Stack trace points to: src/orders/order.service.ts:142 — db.insert(lineItems)
+        Prior warning (ignored): WARN [OrderService] quantity cast from float to int16, precision lost
+        Root cause signal: quantity column is INT16 (max 32767), input was 50000 (float cast to int).
+
+  bt-code-analyzer:
+    - trigger: ".*"
+      response: |
+        Code findings (src/orders/order.service.ts):
+        Line 89: quantity parsed with parseInt() — no upper bound validation
+        Line 142: raw insert without schema validation layer
+        Schema (migrations/003_orders.sql): quantity defined as SMALLINT (max 32767)
+        No input sanitization between controller and service layer.
+        Related: src/orders/order.dto.ts defines quantity as `number` with no max constraint.
+
+  bt-fixer:
+    - trigger: ".*"
+      response: |
+        Fix plan:
+        1. [Migration] ALTER TABLE order_items ALTER COLUMN quantity TYPE INT — removes 32767 cap
+        2. [DTO] Add @Max(1000000) @IsInt() to quantity in order.dto.ts
+        3. [Service] Add guard at line 89: if (quantity > 1_000_000) throw new BadRequestException(...)
+        4. [Test] Add integration test for quantity=50000 to prevent regression
+        Estimated risk: low — migration is additive, no data loss.
+
+  # bt-orchestrator mock intentionally omitted:
+  # bt-fixer's recursive escalation to bt-orchestrator is an edge case.
+  # When testing bt-fixer in isolation, this path uses the default fallback.

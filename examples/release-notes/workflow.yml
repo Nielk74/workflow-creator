@@ -1,0 +1,27 @@
+name: release-notes
+description: Reads a git diff and writes human-friendly release notes
+version: 1
+max_depth: 1
+
+agents:
+  - name: rn-orchestrator
+    file: rn-orchestrator.md
+    mode: primary
+    model: ollama/qwen3.5:9b
+    calls: [diff-reader]
+
+  - name: diff-reader
+    file: diff-reader.md
+    mode: subagent
+    model: ollama/qwen3.5:9b
+    calls: []
+
+mock_responses:
+  diff-reader:
+    - trigger: ".*"
+      response: |
+        Changed files:
+        - src/auth.ts: added JWT refresh logic (42 lines added, 8 removed)
+        - src/api/users.ts: new endpoint POST /users/reset-password (31 lines added)
+        - package.json: bumped jsonwebtoken from 8.5.1 to 9.0.0
+        Summary: authentication improvements and a new password reset endpoint.

@@ -1,0 +1,67 @@
+name: code-review
+description: Reviews code changes — analyzes issues, checks style/patterns, proposes fixes. Fixer can escalate back to orchestrator if a fix introduces new issues.
+version: 1
+max_depth: 2
+
+agents:
+  - name: cr-orchestrator
+    file: cr-orchestrator.md
+    mode: primary
+    model: ollama/qwen3.5:9b
+    calls: [cr-analyzer, cr-reviewer, cr-fixer]
+
+  - name: cr-analyzer
+    file: cr-analyzer.md
+    mode: subagent
+    model: ollama/qwen3.5:9b
+    calls: []
+
+  - name: cr-reviewer
+    file: cr-reviewer.md
+    mode: subagent
+    model: ollama/qwen3.5:9b
+    calls: []
+
+  - name: cr-fixer
+    file: cr-fixer.md
+    mode: subagent
+    model: ollama/qwen3.5:9b
+    calls: [cr-orchestrator]
+    max_recursive_depth: 1
+
+mock_responses:
+  cr-analyzer:
+    - trigger: ".*"
+      response: |
+        Issues found (3):
+        [CRITICAL] src/payment.ts:47 — user input passed directly to SQL query, SQL injection risk
+        [WARNING] src/payment.ts:83 — no error handling on async call, unhandled rejection possible
+        [INFO] src/utils.ts:12 — function `formatAmount` duplicates logic already in src/helpers.ts:34
+
+  cr-reviewer:
+    - trigger: ".*"
+      response: |
+        Style & patterns (2 notes):
+        - Missing JSDoc on exported function `processPayment` (src/payment.ts:10)
+        - Variable name `d` on line 61 is too short — rename to `transactionDate` for clarity
+        Overall structure is sound. No architectural concerns.
+
+  cr-fixer:
+    - trigger: ".*critical.*|.*sql.*|.*injection.*"
+      response: |
+        Fix for SQL injection (src/payment.ts:47):
+        Replace: `db.query("SELECT * FROM users WHERE id=" + userId)`
+        With:    `db.query("SELECT * FROM users WHERE id=?", [userId])`
+        Using parameterized queries eliminates injection risk.
+    - trigger: ".*"
+      response: |
+        Applied fixes:
+        - Wrapped async call in try/catch with error logging (line 83)
+        - Removed duplicate formatAmount, imported from src/helpers.ts
+        - Added JSDoc to processPayment
+        - Renamed `d` to `transactionDate`
+
+  # cr-orchestrator mock intentionally omitted:
+  # cr-fixer's recursive call back to cr-orchestrator is only triggered
+  # in exceptional cases. When testing cr-fixer in isolation, this path
+  # will use the default fallback response, which is acceptable.
