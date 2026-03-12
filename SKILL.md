@@ -202,15 +202,28 @@ This script:
 
 ### 4.5 Run the DEV agent
 
-`opencode run` requires a real terminal (TTY) — it cannot be driven as a background subprocess. Ask the user to open a new terminal window and run the test prompt inline:
+`opencode run` requires a real terminal (TTY). Use this pattern to launch it in a new Windows Terminal tab and detect when it finishes:
 
+**Step 1** — Write a launcher script:
 ```bash
+cat > /c/tmp/oc_run.ps1 <<'EOF'
+Remove-Item -Force C:\tmp\oc_done.txt -ErrorAction SilentlyContinue
 opencode run --agent DEV_<name> "your test prompt here"
+"done" | Out-File C:\tmp\oc_done.txt
+EOF
 ```
 
-OpenCode always reads the latest config on startup, so no restart is needed after `setup_dev_agent.py` runs.
+**Step 2** — Launch it in a new terminal tab:
+```bash
+powershell -Command "Start-Process wt -ArgumentList 'new-tab -- powershell.exe -File C:\tmp\oc_run.ps1'"
+```
 
-Prepare 2–3 realistic test prompts. Run them one at a time. After each run, ask the user to come back here — then read the session logs with `opencode session list` + `opencode export <id>`.
+**Step 3** — Poll for completion:
+```bash
+for i in $(seq 1 60); do [ -f /c/tmp/oc_done.txt ] && echo "done after $((i*5))s" && break || echo "waiting... ($((i*5))s)"; sleep 5; done
+```
+
+OpenCode always reads the latest config on startup, so no restart is needed after `setup_dev_agent.py` runs. Prepare 2–3 realistic test prompts and run them one at a time.
 
 ### 4.6 Read session logs
 
@@ -295,9 +308,15 @@ Present the findings to the user. Ask if they want to apply any of the suggested
 
 Once individual agents pass and the topology is clean, run a full end-to-end test:
 
-1. Ask the user to run the **real** workflow (not DEV_) in their terminal:
+1. Launch the **real** workflow (not DEV_) in a new terminal tab and wait for completion:
    ```bash
+   cat > /c/tmp/oc_run.ps1 <<'EOF'
+   Remove-Item -Force C:\tmp\oc_done.txt -ErrorAction SilentlyContinue
    opencode run --agent <orchestrator-name> "<realistic end-to-end prompt>"
+   "done" | Out-File C:\tmp\oc_done.txt
+   EOF
+   powershell -Command "Start-Process wt -ArgumentList 'new-tab -- powershell.exe -File C:\tmp\oc_run.ps1'"
+   for i in $(seq 1 60); do [ -f /c/tmp/oc_done.txt ] && echo "done after $((i*5))s" && break || echo "waiting... ($((i*5))s)"; sleep 5; done
    ```
 
 2. Read the session logs:
@@ -305,9 +324,15 @@ Once individual agents pass and the topology is clean, run a full end-to-end tes
    python ~/.config/opencode/workflow-creator/scripts/read_logs.py --agent <orchestrator-name> --last 1
    ```
 
-3. Compare against baseline — ask the user to run the same prompt with the default Build agent:
+3. Compare against baseline — run the same prompt with the default Build agent:
    ```bash
+   cat > /c/tmp/oc_run.ps1 <<'EOF'
+   Remove-Item -Force C:\tmp\oc_done.txt -ErrorAction SilentlyContinue
    opencode run "same prompt"
+   "done" | Out-File C:\tmp\oc_done.txt
+   EOF
+   powershell -Command "Start-Process wt -ArgumentList 'new-tab -- powershell.exe -File C:\tmp\oc_run.ps1'"
+   for i in $(seq 1 60); do [ -f /c/tmp/oc_done.txt ] && echo "done" && break || sleep 5; done
    ```
    Then read that session too.
 
