@@ -12,7 +12,7 @@ A "workflow" is a team of coordinated OpenCode agents: one **orchestrator** (pri
 The full loop:
 1. Understand what the user wants the workflow to accomplish
 2. Design the agent team and write `workflow.yml`
-3. Write each agent's `.md` file to `~/.config/opencode/agents/`
+3. Write each agent's `.md` file to `.opencode/<workflow-name>/`
 4. Test each agent in isolation using the `DEV_` pattern + Mock MCP
 5. Evaluate from OpenCode session logs
 6. Optimize: rewrite agent, save to both `DEV_` and real file
@@ -43,11 +43,11 @@ Design the agent team:
 - **N specialists** (mode: subagent) — each focused on one domain
 - For recursive topologies: a specialist can call `@orchestrator` but must be bounded by `max_depth`
 
-Write or update `workflow.yml` in `.opencode/` (project-scoped context) or confirm with user if they want it elsewhere. See `references/workflow_schema.md` for the full schema.
+Write or update `workflow.yml` in `.opencode/<workflow-name>/` (a subfolder named after the workflow). All workflow files — `workflow.yml` and all agent `.md` files — live together in this subfolder. See `references/workflow_schema.md` for the full schema.
 
 After writing, validate it:
 ```bash
-python ~/.config/opencode/workflow-creator/scripts/validate_workflow.py --workflow .opencode/workflow.yml
+python ~/.config/opencode/workflow-creator/scripts/validate_workflow.py --workflow .opencode/<workflow-name>/workflow.yml
 ```
 
 Example minimal design:
@@ -83,7 +83,9 @@ agents:
 
 ## Stage 3 — Write Agent Files
 
-Write each agent's `.md` file to `~/.config/opencode/agents/<name>.md`.
+Write each agent's `.md` file to `.opencode/<workflow-name>/<name>.md` (same subfolder as `workflow.yml`).
+
+> **Mode rule:** Only agents the user can launch manually with `opencode run --agent <name>` should use `mode: primary`. Agents that are only ever called by another agent should use `mode: subagent`. If an agent is set to `subagent` mode, OpenCode will not expose it as a runnable entry point — the user won't be able to invoke it directly. The orchestrator is always `primary`. Specialists are `subagent` unless the user explicitly wants to run one standalone.
 
 ### Orchestrator template
 ```markdown
@@ -139,7 +141,7 @@ Return: <what the orchestrator expects back>
 
 After writing, confirm all files exist:
 ```bash
-ls ~/.config/opencode/agents/
+ls .opencode/<workflow-name>/
 ```
 
 ---
@@ -195,10 +197,12 @@ python ~/.config/opencode/workflow-creator/scripts/setup_dev_agent.py \
 ```
 
 This script:
-- Copies `~/.config/opencode/agents/<name>.md` to `~/.config/opencode/agents/DEV_<name>.md`
+- Copies `.opencode/<workflow-name>/<name>.md` to `.opencode/<workflow-name>/DEV_<name>.md`
 - Rewrites `@subagent` mentions to `[use mock_<subagent> tool]`
 - Writes `.opencode/mock_responses.yml` from `workflow.yml` mock_responses
 - Adds the Mock MCP to `~/.config/opencode/opencode.json` if not already present
+
+> **Mode during testing:** If the agent under test has `mode: subagent` in its frontmatter, you must temporarily change it to `mode: primary` in the `DEV_<name>.md` file before the user runs it. `subagent` mode prevents manual invocation via `opencode run`. Restore it to `subagent` after testing (or let `teardown_dev_agent.py` handle cleanup). The real `<name>.md` should always keep its original mode unchanged.
 
 ### 4.5 Run the DEV agent
 
@@ -224,14 +228,43 @@ This outputs a structured summary: tool calls made, mock tools invoked, final re
 
 ## Stage 5 — Evaluate
 
-Spawn the evaluator subagent:
+Before running the evaluator for the first time in a workflow, create a `TMP_agent` in the workflow subfolder. This is a real OpenCode agent file used as the evaluation/optimization workhorse for the entire test cycle. It is deleted at the end (Stage 6 teardown).
 
+### 5.1 Create TMP_agent
+
+Write `.opencode/<workflow-name>/TMP_agent.md`:
+
+```markdown
+---
+description: Temporary evaluation and optimization agent for <workflow-name> testing
+mode: primary
+model: <model chosen by user in Stage 1>
+tools:
+  read: true
+  write: true
+---
+
+You are a temporary evaluation and optimization agent for the <workflow-name> workflow.
+
+You will be asked to either:
+- **Evaluate** an agent run: read the agent file and log summary provided, score (1–5), and return specific improvement notes
+- **Optimize** an agent file: rewrite the system prompt based on evaluation notes, return the full new file content
+
+Always read the files referenced in the prompt before responding.
 ```
-Read agents/evaluator.md and evaluate this agent run.
-Log summary: <paste read_logs.py output>
-Agent file: ~/.config/opencode/agents/DEV_<name>.md
-Test prompt: "<prompt used>"
-Expected behavior: <what the orchestrator expects this agent to return>
+
+Use the model the user selected in Stage 1 for the role that best fits evaluation (typically the thinking/reasoning model).
+
+### 5.2 Run the evaluator
+
+Ask the user to run in their terminal:
+```bash
+opencode run --agent <workflow-name>/TMP_agent "Evaluate this agent run. Read ~/.config/opencode/workflow-creator/agents/evaluator.md for instructions. Log summary: <paste read_logs.py output> | Agent file: .opencode/<workflow-name>/DEV_<name>.md | Test prompt: \"<prompt used>\" | Expected behavior: <what the orchestrator expects>"
+```
+
+Then read the session log:
+```bash
+python ~/.config/opencode/workflow-creator/scripts/read_logs.py --agent TMP_agent --last 1
 ```
 
 The evaluator checks:
@@ -247,19 +280,21 @@ It returns a score (1–5) and specific improvement notes.
 
 ## Stage 6 — Optimize
 
-If the score is < 4 or the user wants improvements, spawn the optimizer:
+If the score is < 4 or the user wants improvements, run the optimizer via TMP_agent:
 
-```
-Read agents/optimizer.md and rewrite this agent.
-Current agent: ~/.config/opencode/agents/DEV_<name>.md
-Evaluation notes: <evaluator output>
-workflow.yml context: <relevant agent spec>
+```bash
+opencode run --agent <workflow-name>/TMP_agent "Optimize this agent. Read ~/.config/opencode/workflow-creator/agents/optimizer.md for instructions. Current agent: .opencode/<workflow-name>/DEV_<name>.md | Evaluation notes: <evaluator output> | workflow.yml context: <relevant agent spec>"
 ```
 
-The optimizer rewrites the agent system prompt based on the evaluation. After it returns the new content:
+Then read the session log to get the rewritten agent content:
+```bash
+python ~/.config/opencode/workflow-creator/scripts/read_logs.py --agent TMP_agent --last 1
+```
 
-1. Save to `DEV_<name>.md`
-2. Also save to the real `<name>.md` (they stay in sync — DEV is just the test harness wrapping)
+After TMP_agent returns the new content:
+
+1. Save to `.opencode/<workflow-name>/DEV_<name>.md`
+2. Also save to `.opencode/<workflow-name>/<name>.md` (they stay in sync — DEV is just the test harness wrapping)
 3. Re-run the test (go back to Stage 4.3)
 
 Repeat until score >= 4 or the user is satisfied.
@@ -272,22 +307,34 @@ python ~/.config/opencode/workflow-creator/scripts/teardown_dev_agent.py --agent
 ```
 This removes `DEV_<name>.md` and cleans up mock config.
 
+Delete `TMP_agent` only after **all** agents in the workflow have been tested and optimized:
+```bash
+rm .opencode/<workflow-name>/TMP_agent.md
+```
+
 ---
 
 ## Stage 7 — Workflow-level Analysis
 
-After all agents are individually tested, run the workflow analyzer:
+After all agents are individually tested, run the workflow analyzer via TMP_agent:
 
+```bash
+opencode run --agent <workflow-name>/TMP_agent "Analyze this workflow. Read ~/.config/opencode/workflow-creator/agents/workflow-analyzer.md for instructions. workflow.yml: .opencode/<workflow-name>/workflow.yml | Agents directory: .opencode/<workflow-name>/ | Recent test log summaries: <paste any read_logs.py output worth including>"
 ```
-Read agents/workflow-analyzer.md and analyze this workflow.
-workflow.yml: <path>
-Agents directory: ~/.config/opencode/agents/
-Recent test log summaries: <paste any read_logs.py output worth including>
+
+Then read the session log:
+```bash
+python ~/.config/opencode/workflow-creator/scripts/read_logs.py --agent TMP_agent --last 1
 ```
 
 The analyzer checks topology, agent boundaries, tool permissions, model assignments, depth/recursion, and mock coverage. It returns a structured report with a topology diagram.
 
 Present the findings to the user. Ask if they want to apply any of the suggested restructuring before considering the workflow done.
+
+After this stage, delete TMP_agent if you haven't already:
+```bash
+rm .opencode/<workflow-name>/TMP_agent.md
+```
 
 ---
 
