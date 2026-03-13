@@ -25,7 +25,7 @@ except ImportError:
     print("PyYAML required: pip install pyyaml", file=sys.stderr)
     sys.exit(1)
 
-AGENTS_DIR = Path.home() / ".config" / "opencode" / "agents"
+AGENTS_BASE_DIR = Path.home() / ".config" / "opencode" / "agents"
 OPENCODE_CONFIG = Path.home() / ".config" / "opencode" / "opencode.json"
 MOCK_SERVER_PATH = Path(__file__).parent / "mock_mcp_server.py"
 
@@ -58,9 +58,9 @@ def rewrite_agent_prompt(content: str, calls: list) -> str:
 
     for called_agent in calls:
         tool_name = "mock_" + called_agent.replace("-", "_")
-        # Replace @agentname with instruction to use mock tool
+        # Replace @agentname or @folder/agentname with instruction to use mock tool
         content = re.sub(
-            rf"@{re.escape(called_agent)}\b",
+            rf"@(?:[\w][\w-]*/)?{re.escape(called_agent)}\b",
             f"[use {tool_name} tool]",
             content
         )
@@ -140,8 +140,12 @@ def main():
     agent_spec = get_agent_spec(workflow, args.agent)
     calls = agent_spec.get("calls", [])
 
-    source = AGENTS_DIR / f"{args.agent}.md"
-    dest = AGENTS_DIR / f"DEV_{args.agent}.md"
+    workflow_name = workflow.get("name", "")
+    agents_dir = AGENTS_BASE_DIR / workflow_name if workflow_name else AGENTS_BASE_DIR
+    agents_dir.mkdir(parents=True, exist_ok=True)
+
+    source = agents_dir / f"{args.agent}.md"
+    dest = agents_dir / f"DEV_{args.agent}.md"
 
     if not source.exists():
         print(f"Agent file not found: {source}", file=sys.stderr)

@@ -12,7 +12,7 @@ A "workflow" is a team of coordinated OpenCode agents: one **orchestrator** (pri
 The full loop:
 1. Understand what the user wants the workflow to accomplish
 2. Design the agent team and write `workflow.yml`
-3. Write each agent's `.md` file to `.opencode/<workflow-name>/`
+3. Write each agent's `.md` file to `~/.config/opencode/agents/<workflow-name>/`
 4. Test each agent in isolation using the `DEV_` pattern + Mock MCP
 5. Evaluate from OpenCode session logs
 6. Optimize: rewrite agent, save to both `DEV_` and real file
@@ -43,7 +43,7 @@ Design the agent team:
 - **N specialists** (mode: subagent) — each focused on one domain
 - For recursive topologies: a specialist can call `@orchestrator` but must be bounded by `max_depth`
 
-Write or update `workflow.yml` in `.opencode/<workflow-name>/` (a subfolder named after the workflow). All workflow files — `workflow.yml` and all agent `.md` files — live together in this subfolder. See `references/workflow_schema.md` for the full schema.
+Write or update `workflow.yml` in `.opencode/<workflow-name>/` (project-scoped, one subfolder per workflow). Use the `name` field from the workflow as the subfolder. See `references/workflow_schema.md` for the full schema.
 
 After writing, validate it:
 ```bash
@@ -83,9 +83,9 @@ agents:
 
 ## Stage 3 — Write Agent Files
 
-Write each agent's `.md` file to `.opencode/<workflow-name>/<name>.md` (same subfolder as `workflow.yml`).
+Write each agent's `.md` file to `~/.config/opencode/agents/<workflow-name>/<name>.md`. The subfolder must match the workflow `name` field so scripts can resolve it automatically.
 
-> **Mode rule:** Only agents the user can launch manually with `opencode run --agent <name>` should use `mode: primary`. Agents that are only ever called by another agent should use `mode: subagent`. If an agent is set to `subagent` mode, OpenCode will not expose it as a runnable entry point — the user won't be able to invoke it directly. The orchestrator is always `primary`. Specialists are `subagent` unless the user explicitly wants to run one standalone.
+> **Cross-agent references must use the full path**: whenever an agent calls another agent, write it as `@<workflow-name>/<agent_name>` — never bare `@<agent_name>`. OpenCode resolves agents relative to the agents root, so the folder prefix is required for agents stored in subfolders.
 
 ### Orchestrator template
 ```markdown
@@ -101,8 +101,8 @@ You are the orchestrator for <workflow name>.
 Your job: receive a task, break it into subtasks, delegate to specialists, synthesize results.
 
 ## Specialists available
-- @<specialist1>: <what it handles>
-- @<specialist2>: <what it handles>
+- @<workflow-name>/<specialist1>: <what it handles>
+- @<workflow-name>/<specialist2>: <what it handles>
 
 ## Depth limit
 You may be called recursively. Current depth is tracked by the calling agent. Do not delegate further if depth >= <max_depth>.
@@ -141,7 +141,7 @@ Return: <what the orchestrator expects back>
 
 After writing, confirm all files exist:
 ```bash
-ls .opencode/<workflow-name>/
+ls ~/.config/opencode/agents/<workflow-name>/
 ```
 
 ---
@@ -165,7 +165,7 @@ Example for a 3-level workflow:
 
 For each leaf agent, ask the user to run 2–3 realistic prompts in their terminal:
 ```bash
-opencode run --agent <leaf-agent-name> "realistic prompt"
+opencode run --agent <workflow-name>/<leaf-agent-name> "realistic prompt"
 ```
 
 After each run, verify the output looks correct with:
@@ -179,7 +179,7 @@ Once a leaf agent has been tested and its outputs look good, capture them into `
 ```bash
 python ~/.config/opencode/workflow-creator/scripts/capture_responses.py \
   --agent <leaf-agent-name> \
-  --workflow <path-to-workflow.yml> \
+  --workflow .opencode/<workflow-name>/workflow.yml \
   --last 3
 ```
 
@@ -193,33 +193,47 @@ Once mocks are populated for all subagents an agent calls, run setup:
 ```bash
 python ~/.config/opencode/workflow-creator/scripts/setup_dev_agent.py \
   --agent <name> \
-  --workflow <path-to-workflow.yml>
+  --workflow .opencode/<workflow-name>/workflow.yml
 ```
 
 This script:
-- Copies `.opencode/<workflow-name>/<name>.md` to `.opencode/<workflow-name>/DEV_<name>.md`
+- Copies `~/.config/opencode/agents/<workflow-name>/<name>.md` to `~/.config/opencode/agents/<workflow-name>/DEV_<name>.md`
+- **Overrides `mode:` to `all`** in the DEV copy (see note below)
 - Rewrites `@subagent` mentions to `[use mock_<subagent> tool]`
 - Writes `.opencode/mock_responses.yml` from `workflow.yml` mock_responses
 - Adds the Mock MCP to `~/.config/opencode/opencode.json` if not already present
 
-> **Mode during testing:** If the agent under test has `mode: subagent` in its frontmatter, you must temporarily change it to `mode: primary` in the `DEV_<name>.md` file before the user runs it. `subagent` mode prevents manual invocation via `opencode run`. Restore it to `subagent` after testing (or let `teardown_dev_agent.py` handle cleanup). The real `<name>.md` should always keep its original mode unchanged.
+> **Mode override — why this matters**: Subagent files carry `mode: subagent` in their frontmatter, which prevents direct invocation via `opencode run`. Testing a `subagent`-mode agent would either fail or produce results that don't reflect real behavior. The setup script automatically patches the DEV copy to `mode: all` so it can be invoked standalone and evaluated normally. The real agent file is **never modified** — the mode change is scoped to the DEV copy only.
 
 ### 4.5 Run the DEV agent
 
-`opencode run` requires a real terminal (TTY) — it cannot be driven as a background subprocess. Ask the user to open a new terminal window and run the test prompt inline:
+`opencode run` requires a real terminal (TTY). Use this pattern to launch it in a new Windows Terminal tab and detect when it finishes:
 
+**Step 1** — Write a launcher script:
 ```bash
-opencode run --agent DEV_<name> "your test prompt here"
+cat > /c/tmp/oc_run.ps1 <<'EOF'
+Remove-Item -Force C:\tmp\oc_done.txt -ErrorAction SilentlyContinue
+opencode run --agent <workflow-name>/DEV_<name> "your test prompt here"
+"done" | Out-File C:\tmp\oc_done.txt
+EOF
 ```
 
-OpenCode always reads the latest config on startup, so no restart is needed after `setup_dev_agent.py` runs.
+**Step 2** — Launch it in a new terminal tab:
+```bash
+powershell -Command "Start-Process wt -ArgumentList 'new-tab -- powershell.exe -File C:\tmp\oc_run.ps1'"
+```
 
-Prepare 2–3 realistic test prompts. Run them one at a time. After each run, ask the user to come back here — then read the session logs with `opencode session list` + `opencode export <id>`.
+**Step 3** — Poll for completion:
+```bash
+for i in $(seq 1 60); do [ -f /c/tmp/oc_done.txt ] && echo "done after $((i*5))s" && break || echo "waiting... ($((i*5))s)"; sleep 5; done
+```
+
+OpenCode always reads the latest config on startup, so no restart is needed after `setup_dev_agent.py` runs. Prepare 2–3 realistic test prompts and run them one at a time.
 
 ### 4.6 Read session logs
 
 ```bash
-python ~/.config/opencode/workflow-creator/scripts/read_logs.py --agent DEV_<name> --last 1
+python ~/.config/opencode/workflow-creator/scripts/read_logs.py --agent <workflow-name>/DEV_<name> --last 1
 ```
 
 This outputs a structured summary: tool calls made, mock tools invoked, final response, any errors or loops.
@@ -228,17 +242,17 @@ This outputs a structured summary: tool calls made, mock tools invoked, final re
 
 ## Stage 5 — Evaluate
 
-Before running the evaluator for the first time in a workflow, create a `TMP_agent` in the workflow subfolder. This is a real OpenCode agent file used as the evaluation/optimization workhorse for the entire test cycle. It is deleted at the end (Stage 6 teardown).
+Before running the evaluator for the first time in a workflow, create a `TMP_agent` in `~/.config/opencode/agents/<workflow-name>/`. This is a real OpenCode agent used as the evaluation/optimization workhorse for the entire test cycle. It is deleted after Stage 7.
 
 ### 5.1 Create TMP_agent
 
-Write `.opencode/<workflow-name>/TMP_agent.md`:
+Write `~/.config/opencode/agents/<workflow-name>/TMP_agent.md`:
 
 ```markdown
 ---
 description: Temporary evaluation and optimization agent for <workflow-name> testing
 mode: primary
-model: <model chosen by user in Stage 1>
+model: <model chosen by user in Stage 1 — use the thinking/reasoning model>
 tools:
   read: true
   write: true
@@ -253,13 +267,18 @@ You will be asked to either:
 Always read the files referenced in the prompt before responding.
 ```
 
-Use the model the user selected in Stage 1 for the role that best fits evaluation (typically the thinking/reasoning model).
-
 ### 5.2 Run the evaluator
 
-Ask the user to run in their terminal:
+Launch TMP_agent with the evaluation task:
+
 ```bash
-opencode run --agent <workflow-name>/TMP_agent "Evaluate this agent run. Read ~/.config/opencode/workflow-creator/agents/evaluator.md for instructions. Log summary: <paste read_logs.py output> | Agent file: .opencode/<workflow-name>/DEV_<name>.md | Test prompt: \"<prompt used>\" | Expected behavior: <what the orchestrator expects>"
+cat > /c/tmp/oc_run.ps1 <<'EOF'
+Remove-Item -Force C:\tmp\oc_done.txt -ErrorAction SilentlyContinue
+opencode run --agent <workflow-name>/TMP_agent "Evaluate this agent run. Read ~/.config/opencode/workflow-creator/agents/evaluator.md for instructions. Log summary: <paste read_logs.py output> | Agent file: ~/.config/opencode/agents/<workflow-name>/DEV_<name>.md | Test prompt: \"<prompt used>\" | Expected behavior: <what the orchestrator expects>"
+"done" | Out-File C:\tmp\oc_done.txt
+EOF
+powershell -Command "Start-Process wt -ArgumentList 'new-tab -- powershell.exe -File C:\tmp\oc_run.ps1'"
+for i in $(seq 1 60); do [ -f /c/tmp/oc_done.txt ] && echo "done after $((i*5))s" && break || echo "waiting... ($((i*5))s)"; sleep 5; done
 ```
 
 Then read the session log:
@@ -283,7 +302,13 @@ It returns a score (1–5) and specific improvement notes.
 If the score is < 4 or the user wants improvements, run the optimizer via TMP_agent:
 
 ```bash
-opencode run --agent <workflow-name>/TMP_agent "Optimize this agent. Read ~/.config/opencode/workflow-creator/agents/optimizer.md for instructions. Current agent: .opencode/<workflow-name>/DEV_<name>.md | Evaluation notes: <evaluator output> | workflow.yml context: <relevant agent spec>"
+cat > /c/tmp/oc_run.ps1 <<'EOF'
+Remove-Item -Force C:\tmp\oc_done.txt -ErrorAction SilentlyContinue
+opencode run --agent <workflow-name>/TMP_agent "Optimize this agent. Read ~/.config/opencode/workflow-creator/agents/optimizer.md for instructions. Current agent: ~/.config/opencode/agents/<workflow-name>/DEV_<name>.md | Evaluation notes: <evaluator output> | workflow.yml context: <relevant agent spec>"
+"done" | Out-File C:\tmp\oc_done.txt
+EOF
+powershell -Command "Start-Process wt -ArgumentList 'new-tab -- powershell.exe -File C:\tmp\oc_run.ps1'"
+for i in $(seq 1 60); do [ -f /c/tmp/oc_done.txt ] && echo "done after $((i*5))s" && break || echo "waiting... ($((i*5))s)"; sleep 5; done
 ```
 
 Then read the session log to get the rewritten agent content:
@@ -293,8 +318,8 @@ python ~/.config/opencode/workflow-creator/scripts/read_logs.py --agent TMP_agen
 
 After TMP_agent returns the new content:
 
-1. Save to `.opencode/<workflow-name>/DEV_<name>.md`
-2. Also save to `.opencode/<workflow-name>/<name>.md` (they stay in sync — DEV is just the test harness wrapping)
+1. Save to `~/.config/opencode/agents/<workflow-name>/DEV_<name>.md`
+2. Also save to the real `~/.config/opencode/agents/<workflow-name>/<name>.md` (they stay in sync — DEV is just the test harness wrapping)
 3. Re-run the test (go back to Stage 4.3)
 
 Repeat until score >= 4 or the user is satisfied.
@@ -303,13 +328,15 @@ Repeat until score >= 4 or the user is satisfied.
 
 When done testing an agent:
 ```bash
-python ~/.config/opencode/workflow-creator/scripts/teardown_dev_agent.py --agent <name>
+python ~/.config/opencode/workflow-creator/scripts/teardown_dev_agent.py \
+  --agent <name> \
+  --workflow .opencode/<workflow-name>/workflow.yml
 ```
-This removes `DEV_<name>.md` and cleans up mock config.
+This removes `DEV_<name>.md` from the agents folder and cleans up mock config.
 
-Delete `TMP_agent` only after **all** agents in the workflow have been tested and optimized:
+Delete `TMP_agent` only after **all** agents in the workflow have been tested and optimized (after Stage 7):
 ```bash
-rm .opencode/<workflow-name>/TMP_agent.md
+rm ~/.config/opencode/agents/<workflow-name>/TMP_agent.md
 ```
 
 ---
@@ -319,7 +346,13 @@ rm .opencode/<workflow-name>/TMP_agent.md
 After all agents are individually tested, run the workflow analyzer via TMP_agent:
 
 ```bash
-opencode run --agent <workflow-name>/TMP_agent "Analyze this workflow. Read ~/.config/opencode/workflow-creator/agents/workflow-analyzer.md for instructions. workflow.yml: .opencode/<workflow-name>/workflow.yml | Agents directory: .opencode/<workflow-name>/ | Recent test log summaries: <paste any read_logs.py output worth including>"
+cat > /c/tmp/oc_run.ps1 <<'EOF'
+Remove-Item -Force C:\tmp\oc_done.txt -ErrorAction SilentlyContinue
+opencode run --agent <workflow-name>/TMP_agent "Analyze this workflow. Read ~/.config/opencode/workflow-creator/agents/workflow-analyzer.md for instructions. workflow.yml: .opencode/<workflow-name>/workflow.yml | Agents directory: ~/.config/opencode/agents/<workflow-name>/ | Recent test log summaries: <paste any read_logs.py output worth including>"
+"done" | Out-File C:\tmp\oc_done.txt
+EOF
+powershell -Command "Start-Process wt -ArgumentList 'new-tab -- powershell.exe -File C:\tmp\oc_run.ps1'"
+for i in $(seq 1 60); do [ -f /c/tmp/oc_done.txt ] && echo "done after $((i*5))s" && break || echo "waiting... ($((i*5))s)"; sleep 5; done
 ```
 
 Then read the session log:
@@ -331,9 +364,9 @@ The analyzer checks topology, agent boundaries, tool permissions, model assignme
 
 Present the findings to the user. Ask if they want to apply any of the suggested restructuring before considering the workflow done.
 
-After this stage, delete TMP_agent if you haven't already:
+After this stage, delete TMP_agent:
 ```bash
-rm .opencode/<workflow-name>/TMP_agent.md
+rm ~/.config/opencode/agents/<workflow-name>/TMP_agent.md
 ```
 
 ---
@@ -342,9 +375,15 @@ rm .opencode/<workflow-name>/TMP_agent.md
 
 Once individual agents pass and the topology is clean, run a full end-to-end test:
 
-1. Ask the user to run the **real** workflow (not DEV_) in their terminal:
+1. Launch the **real** workflow (not DEV_) in a new terminal tab and wait for completion:
    ```bash
+   cat > /c/tmp/oc_run.ps1 <<'EOF'
+   Remove-Item -Force C:\tmp\oc_done.txt -ErrorAction SilentlyContinue
    opencode run --agent <orchestrator-name> "<realistic end-to-end prompt>"
+   "done" | Out-File C:\tmp\oc_done.txt
+   EOF
+   powershell -Command "Start-Process wt -ArgumentList 'new-tab -- powershell.exe -File C:\tmp\oc_run.ps1'"
+   for i in $(seq 1 60); do [ -f /c/tmp/oc_done.txt ] && echo "done after $((i*5))s" && break || echo "waiting... ($((i*5))s)"; sleep 5; done
    ```
 
 2. Read the session logs:
@@ -352,9 +391,15 @@ Once individual agents pass and the topology is clean, run a full end-to-end tes
    python ~/.config/opencode/workflow-creator/scripts/read_logs.py --agent <orchestrator-name> --last 1
    ```
 
-3. Compare against baseline — ask the user to run the same prompt with the default Build agent:
+3. Compare against baseline — run the same prompt with the default Build agent:
    ```bash
+   cat > /c/tmp/oc_run.ps1 <<'EOF'
+   Remove-Item -Force C:\tmp\oc_done.txt -ErrorAction SilentlyContinue
    opencode run "same prompt"
+   "done" | Out-File C:\tmp\oc_done.txt
+   EOF
+   powershell -Command "Start-Process wt -ArgumentList 'new-tab -- powershell.exe -File C:\tmp\oc_run.ps1'"
+   for i in $(seq 1 60); do [ -f /c/tmp/oc_done.txt ] && echo "done" && break || sleep 5; done
    ```
    Then read that session too.
 
@@ -370,7 +415,7 @@ Subagents auto-trigger based on their `description` field. If an agent is being 
 
 ### 9.1 Create trigger evals
 
-Write 8–10 prompts per agent: half that should trigger it, half that shouldn't. Near-misses are more valuable than obvious cases. Save to `.opencode/<agent-name>-trigger-evals.json`:
+Write 8–10 prompts per agent: half that should trigger it, half that shouldn't. Near-misses are more valuable than obvious cases. Save to `.opencode/<workflow-name>/<agent-name>-trigger-evals.json`:
 
 ```json
 [
@@ -384,7 +429,7 @@ Write 8–10 prompts per agent: half that should trigger it, half that shouldn't
 ```bash
 python ~/.config/opencode/workflow-creator/scripts/optimize_descriptions.py \
   --agent <name> \
-  --evals .opencode/<name>-trigger-evals.json \
+  --evals .opencode/<workflow-name>/<name>-trigger-evals.json \
   --model ollama/qwen3.5:9b \
   --iterations 3
 ```

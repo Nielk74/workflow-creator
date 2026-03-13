@@ -10,17 +10,30 @@ import argparse
 import json
 from pathlib import Path
 
-AGENTS_DIR = Path.home() / ".config" / "opencode" / "agents"
+AGENTS_BASE_DIR = Path.home() / ".config" / "opencode" / "agents"
 OPENCODE_CONFIG = Path.home() / ".config" / "opencode" / "opencode.json"
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--agent", required=True, help="Agent name (without DEV_ prefix)")
+    parser.add_argument("--workflow", required=False, help="Path to workflow.yml (used to resolve subfolder)")
     parser.add_argument("--remove-mcp", action="store_true", help="Also remove mock-agents MCP from config")
     args = parser.parse_args()
 
-    dev_path = AGENTS_DIR / f"DEV_{args.agent}.md"
+    agents_dir = AGENTS_BASE_DIR
+    if args.workflow:
+        try:
+            import yaml
+            with open(args.workflow) as f:
+                wf = yaml.safe_load(f)
+            workflow_name = wf.get("name", "")
+            if workflow_name:
+                agents_dir = AGENTS_BASE_DIR / workflow_name
+        except Exception:
+            pass
+
+    dev_path = agents_dir / f"DEV_{args.agent}.md"
     if dev_path.exists():
         dev_path.unlink()
         print(f"Removed {dev_path}")
