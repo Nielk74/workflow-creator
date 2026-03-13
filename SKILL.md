@@ -85,6 +85,8 @@ agents:
 
 Write each agent's `.md` file to `~/.config/opencode/agents/<workflow-name>/<name>.md`. The subfolder must match the workflow `name` field so scripts can resolve it automatically.
 
+> **Cross-agent references must use the full path**: whenever an agent calls another agent, write it as `@<workflow-name>/<agent_name>` — never bare `@<agent_name>`. OpenCode resolves agents relative to the agents root, so the folder prefix is required for agents stored in subfolders.
+
 ### Orchestrator template
 ```markdown
 ---
@@ -99,8 +101,8 @@ You are the orchestrator for <workflow name>.
 Your job: receive a task, break it into subtasks, delegate to specialists, synthesize results.
 
 ## Specialists available
-- @<specialist1>: <what it handles>
-- @<specialist2>: <what it handles>
+- @<workflow-name>/<specialist1>: <what it handles>
+- @<workflow-name>/<specialist2>: <what it handles>
 
 ## Depth limit
 You may be called recursively. Current depth is tracked by the calling agent. Do not delegate further if depth >= <max_depth>.

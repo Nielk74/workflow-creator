@@ -58,9 +58,9 @@ def rewrite_agent_prompt(content: str, calls: list) -> str:
 
     for called_agent in calls:
         tool_name = "mock_" + called_agent.replace("-", "_")
-        # Replace @agentname with instruction to use mock tool
+        # Replace @agentname or @folder/agentname with instruction to use mock tool
         content = re.sub(
-            rf"@{re.escape(called_agent)}\b",
+            rf"@(?:[\w][\w-]*/)?{re.escape(called_agent)}\b",
             f"[use {tool_name} tool]",
             content
         )
